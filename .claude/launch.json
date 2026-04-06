@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["/Users/gabriellabonwitt/Desktop/CarrerFit/backend/app.py"],
+      "port": 5001
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "/usr/local/bin/node",
+      "runtimeArgs": ["/Users/gabriellabonwitt/Desktop/CarrerFit/frontend/node_modules/.bin/vite", "/Users/gabriellabonwitt/Desktop/CarrerFit/frontend", "--port", "5173"],
+      "port": 5173
+    }
+  ]
+}
