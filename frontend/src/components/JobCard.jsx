@@ -1,16 +1,39 @@
 import { Link } from 'react-router-dom'
 import FitScoreCircle from './FitScoreCircle'
 
-export default function JobCard({ job, analysis }) {
+export default function JobCard({ job, analysis, savedJobs = {}, toggleSaveJob }) {
   const score = analysis?.fit_score ?? null
   const strengths = analysis?.strengths?.slice(0, 3) ?? []
   const gaps = analysis?.gaps?.slice(0, 3) ?? []
+  const isSaved = Boolean(savedJobs[job.id])
+
+  function handleBookmark(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    toggleSaveJob?.(job.id)
+  }
 
   return (
     <Link
       to={`/jobs/${job.id}`}
-      className="card p-5 hover:shadow-md transition-shadow block"
+      className="card p-5 hover:shadow-md transition-shadow block relative"
     >
+      {/* Bookmark button */}
+      {toggleSaveJob && (
+        <button
+          onClick={handleBookmark}
+          title={isSaved ? 'Remove from saved' : 'Save job'}
+          className={`absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full transition-colors z-10 ${
+            isSaved
+              ? 'bg-brand-100 text-brand-600 hover:bg-brand-200'
+              : 'bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-gray-600'
+          }`}
+        >
+          {isSaved ? '🔖' : '🔖'}
+          <span className="sr-only">{isSaved ? 'Saved' : 'Save'}</span>
+        </button>
+      )}
+
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           {/* Header */}
@@ -21,7 +44,7 @@ export default function JobCard({ job, analysis }) {
             >
               {job.company.charAt(0)}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 pr-6">
               <h3 className="font-semibold text-gray-900 truncate">{job.title}</h3>
               <p className="text-sm text-gray-500">{job.company} · {job.location}</p>
             </div>
@@ -36,6 +59,11 @@ export default function JobCard({ job, analysis }) {
               <span className="badge bg-green-100 text-green-700">Remote OK</span>
             )}
             <span className="badge bg-gray-100 text-gray-600">{job.industry}</span>
+            {isSaved && (
+              <span className={`badge ${STATUS_BADGE[savedJobs[job.id]] ?? 'bg-brand-100 text-brand-700'}`}>
+                {STATUS_LABEL[savedJobs[job.id]] ?? 'Saved'}
+              </span>
+            )}
           </div>
 
           {/* Strengths / Gaps */}
@@ -93,4 +121,20 @@ export default function JobCard({ job, analysis }) {
       </div>
     </Link>
   )
+}
+
+export const STATUS_LABEL = {
+  saved:        'Want to Apply',
+  applied:      'Applied',
+  interviewing: 'Interviewing',
+  offer:        'Offer Received',
+  rejected:     'Not Moving Forward',
+}
+
+export const STATUS_BADGE = {
+  saved:        'bg-brand-100 text-brand-700',
+  applied:      'bg-blue-100 text-blue-700',
+  interviewing: 'bg-yellow-100 text-yellow-700',
+  offer:        'bg-green-100 text-green-700',
+  rejected:     'bg-gray-100 text-gray-500',
 }

@@ -1,7 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pip3 install:*)"
+      "Bash(pip3 install:*)",
+      "Bash(python3 -c \"import flask; print\\(''ok''\\)\")",
+      "mcp__Claude_Preview__preview_start",
+      "Read(//usr/bin/**)",
+      "Read(//usr/local/**)",
+      "Bash(/opt/anaconda3/bin/python3.12 -c \"import flask, anthropic, pypdf; print\\(''all packages ok''\\)\")",
+      "Bash(/opt/anaconda3/bin/pip install:*)",
+      "Bash(xargs kill:*)",
+      "Bash(curl -s http://localhost:5001/api/health)",
+      "Bash(node -e \":*)",
+      "Bash(/usr/local/bin/node -e \":*)"
     ]
   }
 }

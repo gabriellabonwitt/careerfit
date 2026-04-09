@@ -1,32 +1,48 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { parseResume } from '../resumeParser'
-import { filterJobs } from '../jobData'
+import { inferRoles, getRoleExplanation } from '../roleInference'
+import { filterJobs, ROLE_CATEGORIES, INDUSTRIES, LOCATIONS } from '../jobData'
 import { apiFetch } from '../api'
-
-const ROLE_OPTIONS = ['Software Engineer', 'Data Analyst', 'Product Manager', 'Marketing', 'Finance', 'UX Designer', 'Business Analyst', 'Machine Learning Engineer']
-const INDUSTRY_OPTIONS = ['Tech', 'Finance', 'Consulting', 'Healthcare', 'Consumer Goods', 'EdTech', 'SaaS', 'AI / Research']
-const LOCATION_OPTIONS = ['New York, NY', 'San Francisco, CA', 'Chicago, IL', 'Seattle, WA', 'Boston, MA', 'Remote']
 
 export default function Onboarding({ onComplete }) {
   const navigate = useNavigate()
   const fileRef = useRef(null)
-  const [step, setStep] = useState(1) // 1 = resume, 2 = interests
+  const [step, setStep] = useState(1)
 
-  // Step 1 state
+  // Step 1
   const [file, setFile] = useState(null)
   const [parsedProfile, setParsedProfile] = useState(null)
+  const [confirmedName, setConfirmedName] = useState('')
   const [uploadLoading, setUploadLoading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [isDragging, setIsDragging] = useState(false)
 
-  // Step 2 state
+  // Step 2
   const [roleTitles, setRoleTitles] = useState([])
+  const [roleExplanation, setRoleExplanation] = useState('')
   const [industries, setIndustries] = useState([])
   const [locations, setLocations] = useState([])
   const [jobType, setJobType] = useState('any')
   const [remoteOnly, setRemoteOnly] = useState(false)
+  const [experienceLevel, setExperienceLevel] = useState('any')
   const [searchLoading, setSearchLoading] = useState(false)
+
+  const EXPERIENCE_OPTIONS = [
+    { value: 'any',   label: 'Any level' },
+    { value: 'entry', label: 'Entry level' },
+    { value: '1-3',   label: '1–3 years' },
+    { value: '4plus', label: '4+ years' },
+  ]
+
+  // When a real resume is parsed, auto-infer roles (skip if user hit "Skip")
+  useEffect(() => {
+    if (!parsedProfile || parsedProfile._skipped) return
+    const suggested = inferRoles(parsedProfile)
+    const explanation = getRoleExplanation(parsedProfile, suggested)
+    setRoleTitles(suggested)
+    setRoleExplanation(explanation || '')
+  }, [parsedProfile])
 
   async function handleFileUpload(f) {
     if (!f) return
@@ -34,7 +50,6 @@ export default function Onboarding({ onComplete }) {
     setUploadError('')
     setUploadLoading(true)
     try {
-      // Try backend first; fall back to client-side parsing if unavailable
       let profile = null
       try {
         const form = new FormData()
@@ -44,14 +59,12 @@ export default function Onboarding({ onComplete }) {
           const data = await res.json()
           profile = data.profile
         }
-      } catch {
-        // backend not running — use client-side parser
-      }
-      if (!profile) {
-        profile = await parseResume(f)
-      }
+      } catch { /* backend not running — use client-side parser */ }
+
+      if (!profile) profile = await parseResume(f)
       setParsedProfile(profile)
-    } catch (e) {
+      setConfirmedName(profile.name || '')
+    } catch {
       setUploadError('Could not parse this file. Please try a different PDF or DOCX.')
       setFile(null)
     } finally {
@@ -70,35 +83,19 @@ export default function Onboarding({ onComplete }) {
     setList(prev => prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val])
   }
 
+  function skipWithoutResume() {
+    // Use a sentinel so the useEffect knows not to run inference
+    setParsedProfile({ _skipped: true, skills: [], experience: '', education: '', projects: '', name: '', email: '', raw_text: '' })
+    setRoleTitles([])
+    setStep(2)
+  }
+
   async function handleSubmit() {
     setSearchLoading(true)
     try {
-      let jobs = []
-      try {
-        const res = await apiFetch('/api/jobs/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role_titles: roleTitles, industries, locations, job_type: jobType, remote_only: remoteOnly }),
-        })
-        if (res.ok) {
-          const data = await res.json()
-          jobs = data.jobs || []
-        }
-      } catch {
-        // backend not running — fetch all jobs as fallback
-        try {
-          const res = await apiFetch('/api/jobs/all')
-          if (res.ok) {
-            const data = await res.json()
-            jobs = data.jobs || []
-          }
-        } catch { /* both failed */ }
-      }
-      // Final fallback: use bundled job data
-      if (!jobs.length) {
-        jobs = filterJobs({ roleTitles, industries, locations, jobType, remoteOnly })
-      }
-      const profile = { ...(parsedProfile || {}), preferences: { roleTitles, industries, locations, jobType, remoteOnly } }
+      // Always filter from the frontend job database so categories match exactly
+      const jobs = filterJobs({ roleTitles, industries, locations, jobType, remoteOnly, experienceLevel: experienceLevel !== 'any' ? experienceLevel : null })
+      const profile = { ...(parsedProfile || {}), name: confirmedName, preferences: { roleTitles, industries, locations, jobType, remoteOnly, experienceLevel } }
       onComplete(profile, jobs)
       navigate('/dashboard')
     } catch (e) {
@@ -119,25 +116,24 @@ export default function Onboarding({ onComplete }) {
       </div>
 
       {/* Progress */}
-      <div className="max-w-xl mx-auto w-full px-6 pt-8">
+      <div className="max-w-2xl mx-auto w-full px-6 pt-8">
         <div className="flex items-center gap-3 mb-8">
           {[1, 2].map(n => (
             <div key={n} className="flex items-center gap-3 flex-1">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 transition-colors ${
                 step >= n ? 'bg-brand-600 text-white' : 'bg-gray-200 text-gray-500'
               }`}>{n}</div>
-              <div className={`h-1 flex-1 rounded ${n < 2 ? (step > n ? 'bg-brand-600' : 'bg-gray-200') : 'hidden'}`} />
+              {n < 2 && <div className={`h-1 flex-1 rounded transition-colors ${step > n ? 'bg-brand-600' : 'bg-gray-200'}`} />}
             </div>
           ))}
         </div>
 
-        {/* Step 1: Resume Upload */}
+        {/* ── Step 1: Resume Upload ── */}
         {step === 1 && (
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-1">Upload your resume</h2>
-            <p className="text-gray-500 mb-6">PDF or DOCX · Max 5 MB</p>
+            <p className="text-gray-500 mb-6">PDF or DOCX · We'll detect your skills and suggest matching roles.</p>
 
-            {/* Drop zone */}
             <div
               className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors ${
                 isDragging ? 'border-brand-500 bg-brand-50' : 'border-gray-300 hover:border-brand-400'
@@ -147,12 +143,16 @@ export default function Onboarding({ onComplete }) {
               onDragLeave={() => setIsDragging(false)}
               onDrop={handleDrop}
             >
-              <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={e => handleFileUpload(e.target.files[0])} />
+              <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" className="hidden"
+                onChange={e => handleFileUpload(e.target.files[0])} />
               {uploadLoading ? (
-                <p className="text-brand-600 font-medium animate-pulse">Parsing resume...</p>
-              ) : file ? (
+                <div className="flex flex-col items-center gap-2">
+                  <span className="w-8 h-8 border-2 border-brand-600 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-brand-600 font-medium">Parsing resume and detecting skills...</p>
+                </div>
+              ) : file && parsedProfile ? (
                 <div>
-                  <p className="text-2xl mb-2">✅</p>
+                  <p className="text-3xl mb-2">✅</p>
                   <p className="font-semibold text-gray-900">{file.name}</p>
                   <p className="text-sm text-gray-400 mt-1">Click to replace</p>
                 </div>
@@ -160,7 +160,7 @@ export default function Onboarding({ onComplete }) {
                 <div>
                   <p className="text-4xl mb-3">📄</p>
                   <p className="font-medium text-gray-700">Drag & drop your resume here</p>
-                  <p className="text-sm text-gray-400 mt-1">or click to browse files</p>
+                  <p className="text-sm text-gray-400 mt-1">or click to browse files (PDF or DOCX)</p>
                 </div>
               )}
             </div>
@@ -171,76 +171,119 @@ export default function Onboarding({ onComplete }) {
 
             {/* Parsed preview */}
             {parsedProfile && (
-              <div className="mt-4 card p-4">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Extracted from resume</p>
-                <div className="space-y-2">
-                  {parsedProfile.name && <p className="text-sm"><span className="font-medium">Name:</span> {parsedProfile.name}</p>}
-                  {parsedProfile.email && <p className="text-sm"><span className="font-medium">Email:</span> {parsedProfile.email}</p>}
-                  {parsedProfile.skills?.length > 0 && (
-                    <div>
-                      <p className="text-sm font-medium mb-1">Skills detected:</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {parsedProfile.skills.slice(0, 15).map(s => (
-                          <span key={s} className="badge bg-brand-100 text-brand-700">{s}</span>
-                        ))}
-                        {parsedProfile.skills.length > 15 && (
-                          <span className="text-xs text-gray-400">+{parsedProfile.skills.length - 15} more</span>
-                        )}
-                      </div>
-                    </div>
+              <div className="mt-4 card p-4 space-y-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Extracted from your resume</p>
+
+                {/* Always show editable name field — pre-filled from parser, user can correct */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Your name <span className="text-gray-400 font-normal">(confirm or correct)</span>
+                  </label>
+                  <input
+                    value={confirmedName}
+                    onChange={e => setConfirmedName(e.target.value)}
+                    placeholder="First Last"
+                    className="input text-sm"
+                  />
+                  {parsedProfile.name && parsedProfile.name !== confirmedName && confirmedName === '' && (
+                    <p className="text-xs text-amber-600 mt-1">We detected "{parsedProfile.name}" — edit if incorrect</p>
                   )}
                 </div>
+                {parsedProfile.email && (
+                  <p className="text-sm"><span className="font-medium text-gray-700">Email:</span> {parsedProfile.email}</p>
+                )}
+                {parsedProfile.degree && (
+                  <p className="text-sm"><span className="font-medium text-gray-700">Degree:</span> {parsedProfile.degree}</p>
+                )}
+
+                {parsedProfile.skills?.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 mb-1.5">
+                      Skills detected <span className="text-gray-400 font-normal">({parsedProfile.skills.length})</span>
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                      {parsedProfile.skills.map(s => (
+                        <span key={s} className="badge bg-brand-100 text-brand-700">{s}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {roleTitles.length > 0 && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                    <p className="text-xs font-semibold text-green-700 mb-1.5">
+                      ✨ Roles we suggest for you {roleExplanation && <span className="font-normal text-green-600">— {roleExplanation}</span>}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {roleTitles.map(r => (
+                        <span key={r} className="badge bg-green-100 text-green-800">{r}</span>
+                      ))}
+                    </div>
+                    <p className="text-xs text-green-600 mt-2">You can edit these in the next step.</p>
+                  </div>
+                )}
               </div>
             )}
 
             <div className="mt-6 flex justify-between">
-              <button onClick={() => { setParsedProfile({ skills: [], experience: '', education: '', projects: '', name: '', email: '' }); setStep(2) }} className="btn-secondary text-sm">
+              <button onClick={skipWithoutResume} className="btn-secondary text-sm">
                 Skip — continue without resume
               </button>
               <button
                 onClick={() => setStep(2)}
-                disabled={!parsedProfile && !file}
+                disabled={!parsedProfile}
                 className="btn-primary"
               >
-                Next: Set interests →
+                Next: Review & customize →
               </button>
             </div>
           </div>
         )}
 
-        {/* Step 2: Interests */}
+        {/* ── Step 2: Role Preferences ── */}
         {step === 2 && (
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-1">Set your preferences</h2>
-            <p className="text-gray-500 mb-6">Select all that apply — we'll use these to find your best matches.</p>
+            <h2 className="text-2xl font-bold text-gray-900 mb-1">Review your matches</h2>
+            <p className="text-gray-500 mb-6">
+              {roleTitles.length > 0
+                ? "We've pre-selected roles based on your resume. Add or remove anything."
+                : "Select the types of roles you're interested in."}
+            </p>
 
             <div className="space-y-6">
               {/* Role types */}
               <div>
-                <p className="text-sm font-semibold text-gray-700 mb-2">Role types</p>
+                <p className="text-sm font-semibold text-gray-700 mb-2">Role types <span className="text-gray-400 font-normal">(select all that apply)</span></p>
                 <div className="flex flex-wrap gap-2">
-                  {ROLE_OPTIONS.map(r => (
+                  {ROLE_CATEGORIES.map(r => (
                     <button
                       key={r}
                       onClick={() => toggle(roleTitles, setRoleTitles, r)}
                       className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
-                        roleTitles.includes(r) ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-700 border-gray-300 hover:border-brand-400'
+                        roleTitles.includes(r)
+                          ? 'bg-brand-600 text-white border-brand-600'
+                          : 'bg-white text-gray-700 border-gray-300 hover:border-brand-400'
                       }`}
-                    >{r}</button>
+                    >
+                      {roleTitles.includes(r) && <span className="mr-1">✓</span>}
+                      {r}
+                    </button>
                   ))}
                 </div>
               </div>
 
               {/* Industries */}
               <div>
-                <p className="text-sm font-semibold text-gray-700 mb-2">Industries</p>
+                <p className="text-sm font-semibold text-gray-700 mb-2">Industries <span className="text-gray-400 font-normal">(optional)</span></p>
                 <div className="flex flex-wrap gap-2">
-                  {INDUSTRY_OPTIONS.map(i => (
+                  {INDUSTRIES.map(i => (
                     <button
                       key={i}
                       onClick={() => toggle(industries, setIndustries, i)}
                       className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
-                        industries.includes(i) ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-700 border-gray-300 hover:border-brand-400'
+                        industries.includes(i)
+                          ? 'bg-brand-600 text-white border-brand-600'
+                          : 'bg-white text-gray-700 border-gray-300 hover:border-brand-400'
                       }`}
                     >{i}</button>
                   ))}
@@ -249,41 +292,67 @@ export default function Onboarding({ onComplete }) {
 
               {/* Locations */}
               <div>
-                <p className="text-sm font-semibold text-gray-700 mb-2">Locations</p>
+                <p className="text-sm font-semibold text-gray-700 mb-2">Locations <span className="text-gray-400 font-normal">(optional)</span></p>
                 <div className="flex flex-wrap gap-2">
-                  {LOCATION_OPTIONS.map(l => (
+                  {LOCATIONS.map(l => (
                     <button
                       key={l}
                       onClick={() => toggle(locations, setLocations, l)}
                       className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
-                        locations.includes(l) ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-700 border-gray-300 hover:border-brand-400'
+                        locations.includes(l)
+                          ? 'bg-brand-600 text-white border-brand-600'
+                          : 'bg-white text-gray-700 border-gray-300 hover:border-brand-400'
                       }`}
                     >{l}</button>
                   ))}
                 </div>
               </div>
 
+              {/* Experience level */}
+              <div>
+                <p className="text-sm font-semibold text-gray-700 mb-2">Experience level</p>
+                <div className="flex flex-wrap gap-2">
+                  {EXPERIENCE_OPTIONS.map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setExperienceLevel(opt.value)}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                        experienceLevel === opt.value
+                          ? 'bg-brand-600 text-white border-brand-600'
+                          : 'bg-white text-gray-700 border-gray-300 hover:border-brand-400'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Job type + remote */}
-              <div className="flex flex-wrap gap-6">
+              <div className="flex flex-wrap gap-6 items-end">
                 <div>
                   <p className="text-sm font-semibold text-gray-700 mb-2">Job type</p>
                   <select value={jobType} onChange={e => setJobType(e.target.value)} className="input w-auto">
                     <option value="any">Any</option>
                     <option value="Full-time">Full-time</option>
-                    <option value="Internship">Internship</option>
+                    <option value="Internship">Internship / Co-op</option>
                   </select>
                 </div>
-                <div className="flex items-center gap-2 mt-6">
-                  <input type="checkbox" id="remote" checked={remoteOnly} onChange={e => setRemoteOnly(e.target.checked)} className="w-4 h-4 accent-brand-600" />
+                <div className="flex items-center gap-2 pb-1">
+                  <input type="checkbox" id="remote" checked={remoteOnly}
+                    onChange={e => setRemoteOnly(e.target.checked)} className="w-4 h-4 accent-brand-600" />
                   <label htmlFor="remote" className="text-sm font-medium text-gray-700">Remote only</label>
                 </div>
               </div>
             </div>
 
-            <div className="mt-8 flex justify-between">
+            <div className="mt-8 flex justify-between items-center">
               <button onClick={() => setStep(1)} className="btn-secondary">← Back</button>
               <button onClick={handleSubmit} disabled={searchLoading} className="btn-primary">
-                {searchLoading ? 'Finding matches...' : 'Find my matches →'}
+                {searchLoading
+                  ? <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Finding matches...</span>
+                  : `Find my matches →`
+                }
               </button>
             </div>
           </div>
