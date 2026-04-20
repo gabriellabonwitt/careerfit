@@ -8,6 +8,7 @@ load_dotenv()
 from resume_parser import parse_resume
 from job_data import search_jobs, get_job_by_id, JOBS
 from claude_ai import analyze_job_fit, generate_outreach
+from job_fetcher import fetch_live_jobs
 
 app = Flask(__name__)
 CORS(app)  # Allow all origins — restrict to your Vercel URL after deploying
@@ -58,6 +59,32 @@ def jobs_search():
     if not jobs:
         jobs = JOBS
     return jsonify({"jobs": jobs, "total": len(jobs)})
+
+
+@app.route("/api/jobs/live", methods=["POST"])
+def jobs_live():
+    """Fetch real jobs from The Muse API based on user preferences."""
+    data = request.get_json(silent=True) or {}
+    try:
+        jobs = fetch_live_jobs(
+            role_titles=data.get("role_titles"),
+            locations=data.get("locations"),
+            experience_level=data.get("experience_level"),
+            job_type=data.get("job_type"),
+        )
+        # Fall back to local jobs if API returns nothing
+        if not jobs:
+            jobs = search_jobs(
+                role_titles=data.get("role_titles"),
+                industries=data.get("industries"),
+                locations=data.get("locations"),
+                job_type=data.get("job_type"),
+                remote_only=data.get("remote_only", False),
+            ) or JOBS
+            return jsonify({"jobs": jobs, "total": len(jobs), "source": "local"})
+        return jsonify({"jobs": jobs, "total": len(jobs), "source": "adzuna"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/jobs/all", methods=["GET"])

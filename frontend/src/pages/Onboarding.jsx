@@ -93,9 +93,40 @@ export default function Onboarding({ onComplete }) {
   async function handleSubmit() {
     setSearchLoading(true)
     try {
-      // Always filter from the frontend job database so categories match exactly
-      const jobs = filterJobs({ roleTitles, industries, locations, jobType, remoteOnly, experienceLevel: experienceLevel !== 'any' ? experienceLevel : null })
-      const profile = { ...(parsedProfile || {}), name: confirmedName, preferences: { roleTitles, industries, locations, jobType, remoteOnly, experienceLevel } }
+      let jobs = []
+
+      // Try the live Adzuna API first
+      try {
+        const res = await apiFetch('/api/jobs/live', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            role_titles: roleTitles,
+            locations,
+            experience_level: experienceLevel !== 'any' ? experienceLevel : null,
+            job_type: jobType !== 'any' ? jobType : null,
+          }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          // Only use API results if they're real live jobs — backend fallback list is only 13 jobs
+          if (data.source !== 'local') {
+            jobs = data.jobs || []
+            console.log(`[Jobs] source=${data.source}, count=${jobs.length}`)
+          }
+        }
+      } catch { /* backend down — fall through to static */ }
+
+      // Use the frontend's own 216-job static dataset when no live jobs
+      if (jobs.length === 0) {
+        jobs = filterJobs({ roleTitles, industries, locations, jobType, remoteOnly, experienceLevel: experienceLevel !== 'any' ? experienceLevel : null })
+      }
+
+      const profile = {
+        ...(parsedProfile || {}),
+        name: confirmedName,
+        preferences: { roleTitles, industries, locations, jobType, remoteOnly, experienceLevel },
+      }
       onComplete(profile, jobs)
       navigate('/dashboard')
     } catch (e) {

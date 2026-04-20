@@ -42,7 +42,7 @@ function timeAgo(ts) {
   return `${Math.floor(days / 7)}w ago`
 }
 
-export default function JobDetail({ userProfile, savedJobs = {}, toggleSaveJob, updateJobStatus, contacts = {}, addContact, logInteraction, onLogout }) {
+export default function JobDetail({ userProfile, jobResults = [], savedJobs = {}, toggleSaveJob, updateJobStatus, contacts = {}, addContact, logInteraction, onLogout }) {
   const { jobId } = useParams()
   const navigate = useNavigate()
 
@@ -64,7 +64,8 @@ export default function JobDetail({ userProfile, savedJobs = {}, toggleSaveJob, 
   // Load job from local data, then auto-score
   useEffect(() => {
     setError('')
-    const found = JOBS.find(j => j.id === jobId)
+    // Check live job results first (Adzuna etc.), then fall back to static list
+    const found = jobResults.find(j => j.id === jobId) || JOBS.find(j => j.id === jobId)
     if (found) {
       setJob(found)
       setLoadingJob(false)
@@ -80,7 +81,7 @@ export default function JobDetail({ userProfile, savedJobs = {}, toggleSaveJob, 
         setError('Job not found')
         setLoadingJob(false)
       })
-  }, [jobId])
+  }, [jobId, jobResults])
 
   // Auto-score as soon as the job is loaded
   useEffect(() => {
@@ -350,7 +351,7 @@ export default function JobDetail({ userProfile, savedJobs = {}, toggleSaveJob, 
             {/* Tab: Resume Suggestions */}
             {tab === 'Resume Suggestions' && (
               <div className="space-y-4">
-                <p className="text-sm text-gray-500">Resume bullet suggestions tailored to this job's language and requirements — showing original vs. improved.</p>
+                <p className="text-sm text-gray-500">Per-bullet coaching based on this job — rewrites where needed, and specific questions to help you fill in your own metrics.</p>
                 {(analysis.resume_bullets || []).length === 0 ? (
                   <div className="card p-8 text-center text-gray-400">
                     <p className="text-2xl mb-2">📄</p>
@@ -359,26 +360,50 @@ export default function JobDetail({ userProfile, savedJobs = {}, toggleSaveJob, 
                   </div>
                 ) : (
                   analysis.resume_bullets.map((b, i) => {
-                    const unchanged = b.original === b.improved
+                    const isRewrite = b.type === 'rewrite'
+                    const isAdd     = b.type === 'add'
+
                     return (
-                      <div key={i} className="card p-5">
-                        {b.original && !unchanged && (
-                          <div className="mb-3">
-                            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Original</p>
-                            <p className="text-sm text-gray-500 line-through leading-relaxed">{b.original}</p>
+                      <div key={i} className="card p-5 space-y-3">
+
+                        {/* ── Your bullet ── */}
+                        <div>
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Your bullet</p>
+                          <p className={`text-sm leading-relaxed ${isRewrite ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                            {b.original}
+                          </p>
+                        </div>
+
+                        {/* ── Rewrite (weak opener replaced) ── */}
+                        {isRewrite && (
+                          <div>
+                            <p className="text-xs font-semibold text-green-600 uppercase tracking-wide mb-1">Suggested rewrite</p>
+                            <p className="text-sm text-gray-900 font-medium leading-relaxed">{b.improved}</p>
                           </div>
                         )}
-                        <div className="mb-3">
-                          <p className={`text-xs font-semibold uppercase tracking-wide mb-1 ${unchanged ? 'text-gray-500' : 'text-green-600'}`}>
-                            {unchanged ? '✓ Already strong' : 'Suggested'}
+
+                        {/* ── What to add (missing metric) ── */}
+                        {b.suggestion && (
+                          <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+                            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-1">💡 Fill in your own number</p>
+                            <p className="text-sm text-amber-800">{b.suggestion}</p>
+                          </div>
+                        )}
+
+                        {/* ── Already strong ── */}
+                        {!isRewrite && !isAdd && (
+                          <div>
+                            <p className="text-xs font-semibold text-green-600 uppercase tracking-wide mb-0.5">✓ Already strong</p>
+                          </div>
+                        )}
+
+                        {/* ── Why / tip ── */}
+                        <div className="bg-brand-50 rounded-lg px-3 py-2">
+                          <p className="text-xs text-brand-700">
+                            <span className="font-semibold">Why: </span>{b.reason}
                           </p>
-                          <p className="text-sm text-gray-800 font-medium leading-relaxed">{b.improved}</p>
                         </div>
-                        <div className={`rounded-lg px-3 py-2 ${unchanged ? 'bg-gray-50' : 'bg-brand-50'}`}>
-                          <p className={`text-xs ${unchanged ? 'text-gray-600' : 'text-brand-700'}`}>
-                            <span className="font-semibold">Tip: </span>{b.reason}
-                          </p>
-                        </div>
+
                       </div>
                     )
                   })

@@ -4,6 +4,7 @@ import NavBar from '../components/NavBar'
 import JobCard from '../components/JobCard'
 import { JOBS, ROLE_CATEGORIES, LOCATIONS, filterJobs } from '../jobData'
 import { analyzeAllLocally } from '../localAnalysis'
+import { apiFetch } from '../api'
 
 const TYPE_FILTERS = ['All', 'Full-time', 'Internship', 'Remote', 'Saved']
 
@@ -26,10 +27,24 @@ export default function Dashboard({ userProfile, jobResults, setJobResults, save
   const [activeLocations, setActiveLocations] = useState(prefs.locations || [])
   const [activeJobType, setActiveJobType]     = useState(prefs.jobType || 'any')
   const [remoteOnly, setRemoteOnly]           = useState(prefs.remoteOnly || false)
-  const [experienceLevel, setExperienceLevel] = useState('any')
+  const [experienceLevel, setExperienceLevel] = useState(prefs.experienceLevel || 'any')
+  const [refreshing, setRefreshing]           = useState(false)
+  const [jobSource, setJobSource]             = useState(null) // 'muse' | 'local'
 
   // Fall back to all jobs if empty
   useEffect(() => { if (jobResults.length === 0) setJobResults(JOBS) }, [])
+
+  // Auto-refresh on first load: always re-run the filter to get proper results
+  // (clears any stale 1-job cache from a previous bad API fetch)
+  useEffect(() => {
+    const prefs = userProfile?.preferences || {}
+    const roles = prefs.roleTitles || []
+    const locs  = prefs.locations  || []
+    const exp   = prefs.experienceLevel || 'any'
+    const type  = prefs.jobType || 'any'
+    fetchLiveJobs(roles, locs, exp, type)
+      .then(() => setRefreshing(false))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-score all jobs whenever the job list or profile changes
   useEffect(() => {
@@ -45,17 +60,41 @@ export default function Dashboard({ userProfile, jobResults, setJobResults, save
     setList(prev => prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val])
   }
 
-  function applyFilters() {
-    const results = filterJobs({
-      roleTitles: activeRoles,
-      industries: [],
-      locations: activeLocations,
-      jobType: activeJobType,
-      remoteOnly,
-      experienceLevel: experienceLevel !== 'any' ? experienceLevel : null,
-    })
-    setJobResults(results)
+  async function fetchLiveJobs(roles, locs, expLevel, jobType) {
+    setRefreshing(true)
+    try {
+      const res = await apiFetch('/api/jobs/live', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role_titles:      roles,
+          locations:        locs,
+          experience_level: expLevel !== 'any' ? expLevel : null,
+          job_type:         jobType  !== 'any' ? jobType  : null,
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        // Only use API results if they're real live jobs (not the backend's tiny 13-job fallback list)
+        if (data.jobs?.length && data.source !== 'local') {
+          setJobResults(data.jobs)
+          setJobSource('adzuna')
+          return
+        }
+      }
+    } catch { /* backend down */ }
+
+    // Use the frontend's own 216-job static dataset (much richer than the backend's fallback)
+    const results = filterJobs({ roleTitles: roles, industries: [], locations: locs, jobType, remoteOnly, experienceLevel: expLevel !== 'any' ? expLevel : null })
+    setJobResults(results.length ? results : JOBS)
+    setJobSource('local')
+    setRefreshing(false)
+  }
+
+  async function applyFilters() {
     setShowFilters(false)
+    await fetchLiveJobs(activeRoles, activeLocations, experienceLevel, activeJobType)
+    setRefreshing(false)
   }
 
   function resetFilters() {
@@ -65,6 +104,7 @@ export default function Dashboard({ userProfile, jobResults, setJobResults, save
     setRemoteOnly(false)
     setExperienceLevel('any')
     setJobResults(JOBS)
+    setJobSource(null)
     setShowFilters(false)
   }
 
@@ -104,9 +144,24 @@ export default function Dashboard({ userProfile, jobResults, setJobResults, save
             <h1 className="text-2xl font-bold text-gray-900">
               {userProfile?.name ? `Hey ${userProfile.name.split(' ')[0]} 👋` : 'Your Job Matches'}
             </h1>
-            <p className="text-gray-500 mt-1">{jobResults.length} jobs found based on your preferences.</p>
+            <p className="text-gray-500 mt-1">
+            {jobResults.length} jobs found
+            {jobSource === 'adzuna' && <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">● Live from Adzuna</span>}
+            {jobSource === 'local'  && <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">Demo data · add Adzuna key for live jobs</span>}
+          </p>
           </div>
           <div className="flex gap-2 flex-shrink-0">
+            <button
+              onClick={() => fetchLiveJobs(activeRoles, activeLocations, experienceLevel, activeJobType).then(() => setRefreshing(false))}
+              disabled={refreshing}
+              className="btn-secondary flex items-center gap-2"
+              title="Fetch fresh jobs from The Muse"
+            >
+              {refreshing
+                ? <span className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                : <span>🔄</span>}
+              {refreshing ? 'Loading…' : 'Refresh'}
+            </button>
             <button
               onClick={() => setShowFilters(v => !v)}
               className={`btn-secondary flex items-center gap-2 ${showFilters ? 'border-brand-500 text-brand-600' : ''}`}

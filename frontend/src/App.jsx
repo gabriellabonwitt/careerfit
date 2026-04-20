@@ -59,7 +59,11 @@ function AppContent({ currentUser, onLogout }) {
   const uid = currentUser.id
 
   const [userProfile, setUserProfile] = useState(() => loadFromStorage(`cf_profile_${uid}`, null))
-  const [jobResults,  setJobResults]  = useState(() => loadFromStorage(`cf_jobs_${uid}`, JOBS))
+  const [jobResults,  setJobResults]  = useState(() => {
+    const stored = loadFromStorage(`cf_jobs_${uid}`, JOBS)
+    // If localStorage only has a handful of stale jobs, start with the full static list
+    return stored.length >= 5 ? stored : JOBS
+  })
   const [savedJobs,   setSavedJobs]   = useState(() => loadFromStorage(`cf_saved_${uid}`, {}))
   const [contacts,    setContacts]    = useState(() => loadFromStorage(`cf_contacts_${uid}`, {}))
 
@@ -152,6 +156,7 @@ function AppContent({ currentUser, onLogout }) {
         element={
           <JobDetail
             userProfile={userProfile}
+            jobResults={jobResults}
             savedJobs={savedJobs}
             toggleSaveJob={toggleSaveJob}
             updateJobStatus={updateJobStatus}

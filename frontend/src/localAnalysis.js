@@ -329,6 +329,47 @@ function topJobKeywords(job, n = 8) {
     .map(([w]) => w)
 }
 
+// ── Infer what metric type to ask about based on bullet content ───────────────
+function inferMetricHint(bullet) {
+  const t = bullet.toLowerCase()
+  if (/invest|fund|deal|capital|equity|portfolio|aua|irr|moic|valuation|lbo|dcf|aum|asset/.test(t))
+    return 'What was the deal/fund size, IRR achieved, or AUM impacted? (e.g., "$2.5B fund", "21% IRR")'
+  if (/research|synthesiz|analyz|report|deck|thesis|present|summari/.test(t))
+    return 'What decision did this research drive, or how many stakeholders did it reach? (e.g., "informing 3 investment decisions", "presented to 12 senior partners")'
+  if (/teach|instruct|facilitat|train|mentor|coach|grade|exam|student|course|curriculum/.test(t))
+    return 'What was the class size, pass rate, or improvement in scores? (e.g., "for 45 students", "improving pass rate by 15%")'
+  if (/sales|convert|close|revenue|client|customer|prospect|pitch/.test(t))
+    return 'What was the revenue generated, conversion rate, or number of clients won? (e.g., "closing $120K in ARR", "12% above quota")'
+  if (/recruit|hire|interview|screen|onboard/.test(t))
+    return 'How many candidates did you recruit or screen? What was the time-to-hire improvement? (e.g., "sourced 40+ candidates", "reduced hiring time by 20%")'
+  if (/market|campaign|content|social|email|brand|seo|ads/.test(t))
+    return 'What was the reach, engagement rate, or conversion lift? (e.g., "growing engagement by 35%", "reaching 10K+ followers")'
+  if (/build|develop|engineer|design|implement|launch|deploy|ship/.test(t))
+    return 'How many users did this serve, or what performance improvement did it achieve? (e.g., "used by 5K+ users", "cutting load time by 40%")'
+  if (/manag|lead|supervis|direct|coordinat|oversee/.test(t))
+    return 'How large was the team or budget you managed? (e.g., "team of 8", "$500K budget")'
+  if (/reduc|cut|decreas|save|streamlin|efficien/.test(t))
+    return 'By how much did you reduce it — in % or absolute terms? (e.g., "by 30%", "saving 10 hours/week")'
+  return 'Add a specific number: how many, how much, or by what % did this improve things?'
+}
+
+// ── Reword a bullet to match job language more naturally ─────────────────────
+function alignToJobLanguage(bullet, job) {
+  const title = (job?.title || '').toLowerCase()
+  const desc  = (job?.description || '').toLowerCase()
+
+  // Finance → Engineering/Tech role: reframe analytical skills as data/systems skills
+  if (/engineer|developer|software|backend|frontend/.test(title)) {
+    if (/analyz|research|synthesiz/.test(bullet.toLowerCase())) {
+      return bullet
+        .replace(/\bIC decks?\b/gi, 'internal reports')
+        .replace(/\bsourcing\b/gi, 'pipeline development')
+        .replace(/\bvaluation\b/gi, 'data modeling')
+    }
+  }
+  return bullet
+}
+
 // ── Generate resume bullet suggestions ───────────────────────────────────────
 export function generateResumeSuggestions(userProfile, job) {
   const parsed = [
@@ -337,71 +378,97 @@ export function generateResumeSuggestions(userProfile, job) {
   ]
 
   // Fall back to raw_text extraction when section parser didn't populate fields
-  const bullets = parsed.length > 0
+  const rawBullets = parsed.length > 0
     ? parsed
     : extractBulletsFromRawText(userProfile?.raw_text || '')
 
+  // Normalize display (fix PDF double-spaces) and filter out title/date/header lines
+  const bullets = rawBullets
+    .map(b => b.replace(/\s{2,}/g, ' ').trim())
+    .filter(b => {
+      if (b.length < 50) return false
+      // Job header lines: contain month+year or year ranges
+      if (/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.?\s+20\d{2}/i.test(b)) return false
+      if (/20\d{2}\s*[–\-]\s*(20\d{2}|present)/i.test(b)) return false
+      if (/[|]/.test(b) && /20\d{2}/.test(b)) return false
+      // Fragment lines: don't start with an action verb or weak phrase
+      // (these are mid-sentence continuations from PDF extraction)
+      const firstWord = b.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g, '')
+      const hasVerbStart = ACTION_VERBS.some(v => firstWord === v || firstWord === v + 's' || firstWord === v + 'ed' || firstWord === v + 'ing')
+      const hasWeakStart = Object.keys(VERB_UPGRADES).some(p => b.toLowerCase().startsWith(p))
+      if (!hasVerbStart && !hasWeakStart) return false
+      return true
+    })
+
   if (bullets.length === 0) return []
 
-  const keywords = topJobKeywords(job)
+  const keywords = topJobKeywords(job, 10)
   const suggestions = []
 
   for (const original of bullets) {
     if (suggestions.length >= 5) break
     const lower = original.toLowerCase()
 
-    // 1. Weak phrase opener
-    const weakMatch = Object.keys(VERB_UPGRADES).find(p => lower.startsWith(p))
+    const hasMetric  = /\d+\s*[%$+x×]|\$[\d,]+|\d+[\s-]*(percent|million|billion|k\b|users|customers|clients|projects|employees|team|deals|companies|accounts|students|partners)/i.test(original)
+    const weakMatch  = Object.keys(VERB_UPGRADES).find(p => lower.startsWith(p))
+    const startsVerb = ACTION_VERBS.some(v => new RegExp(`^${v}[a-z]*\\b`, 'i').test(original))
+
+    // ── 1. Weak/passive opener → rewrite the opening verb ────────────────────
     if (weakMatch) {
-      const rest = original.slice(weakMatch.length).trimStart()
-      const verb = VERB_UPGRADES[weakMatch]
-      // Lowercase first char of rest since we're prepending a new verb
-      const restLower = rest.charAt(0).toLowerCase() + rest.slice(1)
-      const improved = `${verb} ${restLower}`
+      const rest     = original.slice(weakMatch.length).trimStart()
+      const restFmt  = rest.charAt(0).toLowerCase() + rest.slice(1)
+      const verb     = VERB_UPGRADES[weakMatch]
+      const rewritten = `${verb} ${restFmt}`
+
       suggestions.push({
+        type:     'rewrite',
         original,
-        improved,
-        reason: `Replaced passive opener "${weakMatch}" with strong action verb "${verb}" to show ownership and impact.`,
+        improved: rewritten,
+        reason:   `"${weakMatch}" is passive — recruiters scan for action verbs.${
+          !hasMetric ? ' Also fill in a specific outcome (see below).' : ''
+        }`,
+        suggestion: !hasMetric ? inferMetricHint(original) : null,
       })
       continue
     }
 
-    // 2. No quantified metric
-    const hasMetric = /\d+\s*[%$+x]|\$[\d,]+|\d+[\s-]*(percent|million|billion|users|customers|clients|projects|employees|team)/i.test(original)
+    // ── 2. No quantified metric → ask the person to fill it in ───────────────
     if (!hasMetric) {
-      // Find a keyword from the job that's already in the bullet
-      const sharedKw = keywords.find(kw => lower.includes(kw))
-      const improved = original.replace(/\.\s*$/, '')
-        + (sharedKw
-          ? `, resulting in measurable improvement in ${sharedKw}`
-          : ', resulting in measurable efficiency gains')
+      const hint = inferMetricHint(original)
+      // If this bullet could be better aligned to the job, suggest the keyword too
+      const missingKw = keywords.find(kw => !lower.includes(kw) && kw.length > 3)
       suggestions.push({
+        type:       'add',
         original,
-        improved,
-        reason: 'Added a quantified outcome. Numbers (%, $, users, projects) make achievements concrete and scannable.',
+        improved:   original,   // don't rewrite — just guide
+        suggestion: hint,
+        reason: missingKw
+          ? `Add your specific outcome above, and consider weaving in "${missingKw}" if it genuinely applies — it's a key term in this job description.`
+          : 'Bullets without numbers are easy to skip. Even a rough figure is better than none.',
       })
       continue
     }
 
-    // 3. Bullet doesn't mention any top job keywords — add a tailoring note
-    const mentionsKeyword = keywords.some(kw => lower.includes(kw))
+    // ── 3. Has metric, but language could match the job better ───────────────
+    const mentionsKeyword = keywords.slice(0, 6).some(kw => lower.includes(kw))
     if (!mentionsKeyword && keywords.length > 0) {
-      const kw = keywords[0]
-      const improved = original.replace(/\.\s*$/, '') + `, leveraging ${kw}`
+      const kw = keywords.find(k => k.length > 3) || keywords[0]
       suggestions.push({
-        original,
-        improved,
-        reason: `Added "${kw}" — a top keyword from this job description — to improve ATS alignment.`,
-      })
-      continue
-    }
-
-    // 4. Good bullet — show it as-is with a positive note
-    if (suggestions.length < 3) {
-      suggestions.push({
+        type:     'tip',
         original,
         improved: original,
-        reason: 'This bullet is already strong. Verify it starts with an action verb and includes a measurable outcome.',
+        reason:   `Strong bullet. If this experience genuinely involved "${kw}", work that term in — it appears throughout this job description and helps with ATS matching.`,
+      })
+      continue
+    }
+
+    // ── 4. Already strong ────────────────────────────────────────────────────
+    if (suggestions.length < 4) {
+      suggestions.push({
+        type:     'tip',
+        original,
+        improved: original,
+        reason:   'This bullet is strong — action verb + measurable result. Make sure the phrasing mirrors the language used in this job description.',
       })
     }
   }
