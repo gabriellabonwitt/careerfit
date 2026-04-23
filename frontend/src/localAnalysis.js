@@ -61,10 +61,12 @@ function scoreJobMatch(userProfile, job) {
   const matchRate = keywords.length > 0 ? matched.length / keywords.length : 0
   const score     = Math.min(25, Math.round(matchRate * 35)) // scale so ~70% match = full score
 
-  // Unmatched requirements → fixes
+  // Unmatched requirements → fixes (only show when fewer than 30% of words appear in resume)
   const unmatchedReqs = (job?.requirements || []).filter(req => {
     const words = (req.toLowerCase().match(/\b[a-z]{3,}\b/g) || []).filter(w => !STOP_WORDS.has(w))
-    return words.length > 0 && words.every(w => !resumeText.includes(w))
+    if (words.length === 0) return false
+    const matched = words.filter(w => resumeText.includes(w) || skills.includes(w))
+    return matched.length / words.length < 0.3
   }).slice(0, 3)
 
   const fixes = [
@@ -502,12 +504,42 @@ export function analyzeJobLocally(userProfile, job) {
     .flatMap(c => (c.positives || []).map(s => ({ skill: s, note: '' })))
     .slice(0, 5)
 
+  // Build a full-text index of everything on the resume
+  // (raw text + skills list + education + degree so majors/certs are found)
+  const rawResume  = (userProfile?.raw_text  || '').toLowerCase()
+  const skillsText = (userProfile?.skills    || []).join(' ').toLowerCase()
+  const eduText    = (userProfile?.education || '').toLowerCase()
+  const degreeText = (userProfile?.degree    || '').toLowerCase()
+  const fullResume = `${rawResume} ${skillsText} ${eduText} ${degreeText}`
+
+  // Common degree-level synonyms so "BS/BA/B.S." matches "bachelor"
+  const DEGREE_SYNONYMS = {
+    'bachelor': ['b.s.','b.a.','bs','ba','bsc','bba','undergraduate','undergrad'],
+    'master':   ['m.s.','m.a.','ms','ma','mba','meng','graduate'],
+    'phd':      ['doctorate','doctoral','ph.d','d.phil'],
+  }
+
+  function resumeContains(word) {
+    if (fullResume.includes(word)) return true
+    // Check synonyms
+    for (const [canonical, synonyms] of Object.entries(DEGREE_SYNONYMS)) {
+      if (word === canonical && synonyms.some(s => fullResume.includes(s))) return true
+      if (synonyms.includes(word) && (fullResume.includes(canonical) || synonyms.some(s => fullResume.includes(s)))) return true
+    }
+    return false
+  }
+
   // Top gaps from job requirements
+  // A requirement is only a real gap if MOST of its key words are absent from the resume.
+  // (Previously used .some() which flagged things as gaps even when 9/10 words matched.)
   const gaps = (job?.requirements || [])
     .filter(req => {
       const words = (req.toLowerCase().match(/\b[a-z]{3,}\b/g) || []).filter(w => !STOP_WORDS.has(w))
-      const resume = (userProfile?.raw_text || '').toLowerCase()
-      return words.some(w => !resume.includes(w))
+      if (words.length === 0) return false
+      const matched   = words.filter(w => resumeContains(w))
+      const matchRate = matched.length / words.length
+      // Only show as a gap when fewer than 40% of the requirement's key words appear anywhere in the resume
+      return matchRate < 0.4
     })
     .slice(0, 5)
     .map(req => ({ requirement: req }))
