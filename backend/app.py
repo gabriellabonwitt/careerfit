@@ -63,7 +63,7 @@ def jobs_search():
 
 @app.route("/api/jobs/live", methods=["POST"])
 def jobs_live():
-    """Fetch real jobs from The Muse API based on user preferences."""
+    """Fetch real jobs from Adzuna API based on user preferences."""
     data = request.get_json(silent=True) or {}
     try:
         jobs = fetch_live_jobs(
@@ -71,6 +71,9 @@ def jobs_live():
             locations=data.get("locations"),
             experience_level=data.get("experience_level"),
             job_type=data.get("job_type"),
+            # Allow users to supply their own Adzuna keys from the frontend
+            adzuna_app_id=data.get("adzuna_app_id"),
+            adzuna_app_key=data.get("adzuna_app_key"),
         )
         # Fall back to local jobs if API returns nothing
         if not jobs:

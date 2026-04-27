@@ -64,9 +64,10 @@ ROLE_KEYWORDS = {
 }
 
 
-def _get_creds():
-    app_id  = os.getenv("ADZUNA_APP_ID",  "").strip()
-    app_key = os.getenv("ADZUNA_APP_KEY", "").strip()
+def _get_creds(override_id=None, override_key=None):
+    """Return Adzuna credentials. User-supplied keys take priority over .env."""
+    app_id  = (override_id  or os.getenv("ADZUNA_APP_ID",  "")).strip()
+    app_key = (override_key or os.getenv("ADZUNA_APP_KEY", "")).strip()
     return app_id, app_key
 
 
@@ -193,13 +194,17 @@ def fetch_live_jobs(
     experience_level=None,
     job_type=None,
     results_per_page=50,
+    adzuna_app_id=None,
+    adzuna_app_key=None,
 ):
     """
     Fetch jobs from Adzuna. Returns [] if API credentials are not configured.
+    Accepts user-supplied keys (adzuna_app_id / adzuna_app_key) which take
+    priority over keys set in .env so users can add their own free-tier key.
     Makes one query per selected role (up to 3) to ensure broad coverage,
     then deduplicates by job ID.
     """
-    app_id, app_key = _get_creds()
+    app_id, app_key = _get_creds(adzuna_app_id, adzuna_app_key)
     if not app_id or not app_key:
         print("[job_fetcher] ADZUNA_APP_ID / ADZUNA_APP_KEY not set — skipping live fetch")
         return []

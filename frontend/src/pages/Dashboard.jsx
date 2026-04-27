@@ -62,6 +62,11 @@ export default function Dashboard({ userProfile, jobResults, setJobResults, save
 
   async function fetchLiveJobs(roles, locs, expLevel, jobType) {
     setRefreshing(true)
+    // Pick up any Adzuna keys the user saved in their profile
+    const uid = userProfile?.userId || 'guest'
+    let adzunaKeys = {}
+    try { adzunaKeys = JSON.parse(localStorage.getItem(`cf_adzuna_${uid}`) || '{}') } catch { /* ignore */ }
+
     try {
       const res = await apiFetch('/api/jobs/live', {
         method: 'POST',
@@ -71,6 +76,8 @@ export default function Dashboard({ userProfile, jobResults, setJobResults, save
           locations:        locs,
           experience_level: expLevel !== 'any' ? expLevel : null,
           job_type:         jobType  !== 'any' ? jobType  : null,
+          adzuna_app_id:    adzunaKeys.app_id  || null,
+          adzuna_app_key:   adzunaKeys.app_key || null,
         }),
       })
       if (res.ok) {
