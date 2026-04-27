@@ -13,9 +13,13 @@ const STATUS_ICON = {
   rejected:     '❌',
 }
 
-export default function SavedJobs({ userProfile, savedJobs = {}, updateJobStatus, toggleSaveJob, onLogout }) {
+export default function SavedJobs({ userProfile, jobResults = [], savedJobs = {}, updateJobStatus, toggleSaveJob, onLogout }) {
   const savedIds = Object.keys(savedJobs)
-  const savedJobsList = JOBS.filter(j => savedIds.includes(j.id))
+  // Check live jobResults first (Adzuna jobs), then fall back to static JOBS
+  const allKnownJobs = jobResults.length > 0 ? jobResults : JOBS
+  const savedJobsList = savedIds
+    .map(id => allKnownJobs.find(j => j.id === id) || JOBS.find(j => j.id === id))
+    .filter(Boolean)
 
   const byStatus = STATUSES.reduce((acc, s) => {
     acc[s] = savedJobsList.filter(j => savedJobs[j.id] === s)
@@ -38,7 +42,7 @@ export default function SavedJobs({ userProfile, savedJobs = {}, updateJobStatus
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <NavBar userName={userProfile?.name} />
+      <NavBar userName={userProfile?.name} onLogout={onLogout} />
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
 
         <div className="flex items-center justify-between mb-6">

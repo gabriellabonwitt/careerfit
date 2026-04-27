@@ -199,6 +199,7 @@ function AppContent({ currentUser, onLogout }) {
         element={
           <SavedJobs
             userProfile={userProfile}
+            jobResults={jobResults}
             savedJobs={savedJobs}
             updateJobStatus={updateJobStatus}
             toggleSaveJob={toggleSaveJob}
