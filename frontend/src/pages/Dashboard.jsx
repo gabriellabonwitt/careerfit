@@ -29,7 +29,13 @@ export default function Dashboard({ userProfile, jobResults, setJobResults, save
   const [remoteOnly, setRemoteOnly]           = useState(prefs.remoteOnly || false)
   const [experienceLevel, setExperienceLevel] = useState(prefs.experienceLevel || 'any')
   const [refreshing, setRefreshing]           = useState(false)
-  const [jobSource, setJobSource]             = useState(null) // 'muse' | 'local'
+
+  // Determine job source immediately — don't wait for auto-refresh
+  const uid = userProfile?.userId || 'guest'
+  const hasAdzunaKeys = (() => {
+    try { const k = JSON.parse(localStorage.getItem(`cf_adzuna_${uid}`) || '{}'); return Boolean(k.app_id && k.app_key) } catch { return false }
+  })()
+  const [jobSource, setJobSource] = useState(hasAdzunaKeys ? null : 'local') // null = loading, 'local' = demo, 'adzuna' = live
 
   // Fall back to all jobs if empty
   useEffect(() => { if (jobResults.length === 0) setJobResults(JOBS) }, [])
@@ -151,11 +157,11 @@ export default function Dashboard({ userProfile, jobResults, setJobResults, save
             <h1 className="text-2xl font-bold text-gray-900">
               {userProfile?.name ? `Hey ${userProfile.name.split(' ')[0]} 👋` : 'Your Job Matches'}
             </h1>
-            <p className="text-gray-500 mt-1">
-            {jobResults.length} jobs found
-            {jobSource === 'adzuna' && <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">● Live from Adzuna</span>}
-            {jobSource === 'local'  && <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">Demo data · add Adzuna key for live jobs</span>}
-          </p>
+            <p className="text-gray-500 mt-1 flex items-center flex-wrap gap-2">
+              {jobResults.length} jobs found
+              {jobSource === 'adzuna' && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">● Live from Adzuna</span>}
+              {jobSource === 'local'  && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">📋 Sample jobs</span>}
+            </p>
           </div>
           <div className="flex gap-2 flex-shrink-0">
             <button
@@ -266,6 +272,24 @@ export default function Dashboard({ userProfile, jobResults, setJobResults, save
               <button onClick={applyFilters} className="btn-primary">Apply filters</button>
               <button onClick={resetFilters} className="btn-secondary">Reset to all jobs</button>
             </div>
+          </div>
+        )}
+
+        {/* Demo mode banner */}
+        {jobSource === 'local' && (
+          <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5">
+            <div className="flex items-start gap-3">
+              <span className="text-xl flex-shrink-0">📋</span>
+              <div>
+                <p className="text-sm font-semibold text-amber-800">You're viewing sample jobs</p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  These {jobResults.length} curated listings let you explore all features. Add a free Adzuna API key to see real live postings.
+                </p>
+              </div>
+            </div>
+            <Link to="/profile" className="flex-shrink-0 text-xs font-semibold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap">
+              Add API key →
+            </Link>
           </div>
         )}
 
