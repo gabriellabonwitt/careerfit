@@ -4,6 +4,7 @@ import { parseResume } from '../resumeParser'
 import { inferRoles, getRoleExplanation } from '../roleInference'
 import { filterJobs, ROLE_CATEGORIES, INDUSTRIES, LOCATIONS } from '../jobData'
 import { apiFetch } from '../api'
+import { fetchAdzunaDirect } from '../adzunaClient'
 
 export default function Onboarding({ onComplete }) {
   const navigate = useNavigate()
@@ -95,29 +96,44 @@ export default function Onboarding({ onComplete }) {
     try {
       let jobs = []
 
-      // Try the live Adzuna API first
-      try {
-        const res = await apiFetch('/api/jobs/live', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            role_titles: roleTitles,
-            locations,
-            experience_level: experienceLevel !== 'any' ? experienceLevel : null,
-            job_type: jobType !== 'any' ? jobType : null,
-          }),
-        })
-        if (res.ok) {
-          const data = await res.json()
-          // Only use API results if they're real live jobs — backend fallback list is only 13 jobs
-          if (data.source !== 'local') {
-            jobs = data.jobs || []
-            console.log(`[Jobs] source=${data.source}, count=${jobs.length}`)
-          }
-        }
-      } catch { /* backend down — fall through to static */ }
+      // ── 1. Try direct Adzuna call if user already has keys saved ──
+      const savedSession = JSON.parse(localStorage.getItem('cf_session') || '{}')
+      const savedUid = savedSession.id || 'guest'
+      let adzunaKeys = {}
+      try { adzunaKeys = JSON.parse(localStorage.getItem(`cf_adzuna_${savedUid}`) || '{}') } catch { /* ignore */ }
 
-      // Use the frontend's own 216-job static dataset when no live jobs
+      if (adzunaKeys.app_id && adzunaKeys.app_key) {
+        try {
+          jobs = await fetchAdzunaDirect({
+            appId: adzunaKeys.app_id, appKey: adzunaKeys.app_key,
+            roles: roleTitles, locations,
+            jobType: jobType !== 'any' ? jobType : null,
+          })
+        } catch { /* fall through */ }
+      }
+
+      // ── 2. Try backend if direct call returned nothing ──
+      if (jobs.length === 0) {
+        try {
+          const res = await apiFetch('/api/jobs/live', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              role_titles: roleTitles, locations,
+              experience_level: experienceLevel !== 'any' ? experienceLevel : null,
+              job_type: jobType !== 'any' ? jobType : null,
+              adzuna_app_id: adzunaKeys.app_id || null,
+              adzuna_app_key: adzunaKeys.app_key || null,
+            }),
+          })
+          if (res.ok) {
+            const data = await res.json()
+            if (data.source !== 'local') jobs = data.jobs || []
+          }
+        } catch { /* backend down */ }
+      }
+
+      // ── 3. Fallback: 216-job demo dataset ──
       if (jobs.length === 0) {
         jobs = filterJobs({ roleTitles, industries, locations, jobType, remoteOnly, experienceLevel: experienceLevel !== 'any' ? experienceLevel : null })
       }

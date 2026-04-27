@@ -5,6 +5,7 @@ import JobCard from '../components/JobCard'
 import { JOBS, ROLE_CATEGORIES, LOCATIONS, filterJobs } from '../jobData'
 import { analyzeAllLocally } from '../localAnalysis'
 import { apiFetch } from '../api'
+import { fetchAdzunaDirect } from '../adzunaClient'
 
 const TYPE_FILTERS = ['All', 'Full-time', 'Internship', 'Remote', 'Saved']
 
@@ -68,11 +69,34 @@ export default function Dashboard({ userProfile, jobResults, setJobResults, save
 
   async function fetchLiveJobs(roles, locs, expLevel, jobType) {
     setRefreshing(true)
-    // Pick up any Adzuna keys the user saved in their profile
+
+    // Read user's Adzuna keys from localStorage
     const uid = userProfile?.userId || 'guest'
     let adzunaKeys = {}
     try { adzunaKeys = JSON.parse(localStorage.getItem(`cf_adzuna_${uid}`) || '{}') } catch { /* ignore */ }
+    const hasKeys = Boolean(adzunaKeys.app_id && adzunaKeys.app_key)
 
+    // ── 1. Direct browser → Adzuna (works on Vercel with no backend) ──
+    if (hasKeys) {
+      try {
+        const jobs = await fetchAdzunaDirect({
+          appId:          adzunaKeys.app_id,
+          appKey:         adzunaKeys.app_key,
+          roles,
+          locations:      locs,
+          jobType:        jobType !== 'any' ? jobType : null,
+          resultsPerPage: 50,
+        })
+        if (jobs.length) {
+          setJobResults(jobs)
+          setJobSource('adzuna')
+          setRefreshing(false)
+          return
+        }
+      } catch { /* fall through */ }
+    }
+
+    // ── 2. Try backend (works in local dev or if backend is deployed) ──
     try {
       const res = await apiFetch('/api/jobs/live', {
         method: 'POST',
@@ -88,16 +112,16 @@ export default function Dashboard({ userProfile, jobResults, setJobResults, save
       })
       if (res.ok) {
         const data = await res.json()
-        // Only use API results if they're real live jobs (not the backend's tiny 13-job fallback list)
         if (data.jobs?.length && data.source !== 'local') {
           setJobResults(data.jobs)
           setJobSource('adzuna')
+          setRefreshing(false)
           return
         }
       }
-    } catch { /* backend down */ }
+    } catch { /* backend not available */ }
 
-    // Use the frontend's own 216-job static dataset (much richer than the backend's fallback)
+    // ── 3. Fallback: frontend's own 216-job demo dataset ──
     const results = filterJobs({ roleTitles: roles, industries: [], locations: locs, jobType, remoteOnly, experienceLevel: expLevel !== 'any' ? expLevel : null })
     setJobResults(results.length ? results : JOBS)
     setJobSource('local')
